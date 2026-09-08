@@ -1,0 +1,41 @@
+# ── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Secrets & local config ───────────────────────────────────────────────
+# .env.example IS committed; the real .env never is.
+.env
+.env.*
+!.env.example
+
+# ── Runtime state ────────────────────────────────────────────────────────
+# The SQLite campaign registry. Telemetry itself lives in the Docker volume
+# (hr_kusto), never in the repo.
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ── Node / frontend ──────────────────────────────────────────────────────
+node_modules/
+dist/
+app/dist/
+*.tsbuildinfo
+.vite/
+
+# ── Editors & OS ─────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs & scratch ───────────────────────────────────────────────────────
+*.log

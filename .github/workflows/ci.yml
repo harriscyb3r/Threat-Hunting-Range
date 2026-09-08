@@ -1,0 +1,86 @@
+# Static checks only.
+#
+# The real verification suite (probe.py, test_phase*.py) needs a running Kusto
+# engine, which means pulling a few hundred MB of Microsoft's kustainer image
+# and accepting its EULA on every run. That is deliberately left to the
+# developer's machine — see "Verify" in the README. What CI guarantees is
+# narrower and honest: the backend parses and imports, and the frontend
+# type-checks and builds.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: backend · import + compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Byte-compile every module
+        working-directory: backend
+        run: python -m compileall -q .
+
+      - name: Import the app and the registries
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import generators.attack as attack, kusto.schemas as schemas
+          import scenarios.library as library, curriculum.lessons as lessons
+          from main import app
+
+          emitters = [attack.get(t) for t in attack.all_emitters()]
+          tables = [schemas.get(n) for n in schemas.table_names()]
+
+          print(f"{len(emitters)} emitters, "
+                f"{sum(len(e.variants) for e in emitters)} variants")
+          print(f"{len(tables)} tables, "
+                f"{sum(len(t.columns) for t in tables)} columns")
+          print(f"{len(library.LIBRARY)} library campaigns, "
+                f"{lessons.total_lessons()} lessons")
+          print(f"{len(app.routes)} routes registered")
+
+          # Guard the numbers the README advertises.
+          assert len(emitters) == 44, len(emitters)
+          assert sum(len(e.variants) for e in emitters) == 131
+          assert len(tables) == 20, len(tables)
+          assert sum(len(t.columns) for t in tables) == 746
+          assert len(library.LIBRARY) == 8
+          assert lessons.total_lessons() == 16
+          PY
+
+  frontend:
+    name: frontend · typecheck + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Type-check and build
+        working-directory: app
+        run: npm run build

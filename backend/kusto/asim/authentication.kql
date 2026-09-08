@@ -1,0 +1,296 @@
+// ASIM Authentication parsers.
+//
+// Built the way Sentinel actually does it: per-source `vim*` parsers with
+// defaulted filtering parameters, unioned by `_Im_Authentication`. Practising
+// against this means the ASIM habits transfer to a real tenant unchanged.
+//
+// Filtering parameters are the ASIM-standard subset that matters for hunting:
+// starttime, endtime, targetusername_has, eventresult. Real ASIM
+// carries a few more (srcipaddr_has_any_prefix, eventtype); they are omitted
+// rather than faked, so nothing here behaves differently from upstream.
+//
+// Push filters as early as possible — that is the whole reason ASIM parsers
+// take parameters instead of leaving you to filter the output.
+//
+// DEVIATION FROM SENTINEL ASIM: the `disabled:bool=false` parameter is omitted.
+// `disabled` is a reserved word in this engine's function-parameter grammar —
+// `disabled:bool=false` is rejected with SYN0002 while `isdisabled:bool=false`
+// and `p:bool=false` are both accepted, so it is the identifier, not the type.
+// In Sentinel that parameter exists so a tenant can switch a source parser off
+// centrally via the ASimDisabledParsers watchlist; it has no meaning in a local
+// range. Every other parameter and field matches upstream, so queries written
+// here still port unchanged.
+
+.create-or-alter function with (FolderName="ASIM/Authentication", DocString="ASIM Authentication parser for Entra ID interactive sign-ins")
+vimAuthenticationSigninLogs(starttime:datetime=datetime(null), endtime:datetime=datetime(null), targetusername_has:string="*", eventresult:string="*")
+{
+    let parser = (){
+        SigninLogs
+        | where (isnull(starttime) or TimeGenerated >= starttime)
+            and (isnull(endtime) or TimeGenerated <= endtime)
+        | where (targetusername_has == "*" or UserPrincipalName has targetusername_has)
+        | extend EventResult = iff(ResultType == "0", "Success", "Failure")
+        | where (eventresult == "*" or EventResult == eventresult)
+        | extend
+            EventCount = int(1),
+            EventStartTime = TimeGenerated,
+            EventEndTime = TimeGenerated,
+            EventType = "Logon",
+            EventProduct = "Entra ID",
+            EventVendor = "Microsoft",
+            EventSchema = "Authentication",
+            EventSchemaVersion = "0.1.3",
+            EventOriginalUid = tostring(CorrelationId),
+            EventOriginalType = Category,
+            EventResultDetails = case(
+                ResultType == "0", "",
+                ResultType == "50126", "Incorrect password",
+                ResultType == "50076", "MFA required",
+                ResultType == "50074", "MFA required",
+                ResultType == "53003", "Blocked by policy",
+                ResultType == "50173", "Session expired",
+                ResultType == "50058", "No session",
+                "Other"),
+            TargetUserId = UserId,
+            TargetUserIdType = "EntraID",
+            TargetUsername = UserPrincipalName,
+            TargetUsernameType = "UPN",
+            TargetUserType = "Member",
+            TargetSessionId = tostring(CorrelationId),
+            ActorUsername = UserPrincipalName,
+            ActorUsernameType = "UPN",
+            SrcIpAddr = IPAddress,
+            SrcGeoCountry = tostring(LocationDetails.countryOrRegion),
+            SrcGeoCity = tostring(LocationDetails.city),
+            SrcDvcOs = tostring(DeviceDetail.operatingSystem),
+            SrcDvcId = tostring(DeviceDetail.deviceId),
+            SrcHostname = tostring(DeviceDetail.displayName),
+            LogonMethod = AuthenticationRequirement,
+            LogonProtocol = ClientAppUsed,
+            TargetAppName = AppDisplayName,
+            TargetAppId = AppId,
+            TargetAppType = "Cloud Service",
+            HttpUserAgent = UserAgent,
+            Dvc = "Entra ID",
+            DvcHostname = "",
+            DvcIpAddr = "",
+            EventUid = _ItemId
+        | extend
+            User = TargetUsername,
+            LogonTarget = TargetAppName,
+            Application = TargetAppName,
+            Dst = TargetAppName,
+            Src = SrcIpAddr,
+            IpAddr = SrcIpAddr
+        | project TimeGenerated, EventCount, EventStartTime, EventEndTime, EventType,
+                  EventResult, EventResultDetails, EventProduct, EventVendor, EventSchema,
+                  EventSchemaVersion, EventOriginalUid, EventOriginalType, EventUid,
+                  TargetUserId, TargetUserIdType, TargetUsername, TargetUsernameType,
+                  TargetUserType, TargetSessionId, TargetAppName, TargetAppId, TargetAppType,
+                  ActorUsername, ActorUsernameType,
+                  SrcIpAddr, SrcGeoCountry, SrcGeoCity, SrcDvcOs, SrcDvcId, SrcHostname,
+                  LogonMethod, LogonProtocol, HttpUserAgent, Dvc, DvcHostname, DvcIpAddr,
+                  User, LogonTarget, Application, Dst, Src, IpAddr, _ItemId
+    };
+    parser()
+}
+
+.create-or-alter function with (FolderName="ASIM/Authentication", DocString="ASIM Authentication parser for Entra ID non-interactive sign-ins")
+vimAuthenticationAADNonInteractive(starttime:datetime=datetime(null), endtime:datetime=datetime(null), targetusername_has:string="*", eventresult:string="*")
+{
+    let parser = (){
+        AADNonInteractiveUserSignInLogs
+        | where (isnull(starttime) or TimeGenerated >= starttime)
+            and (isnull(endtime) or TimeGenerated <= endtime)
+        | where (targetusername_has == "*" or UserPrincipalName has targetusername_has)
+        | extend EventResult = iff(ResultType == "0", "Success", "Failure")
+        | where (eventresult == "*" or EventResult == eventresult)
+        | extend
+            EventCount = int(1),
+            EventStartTime = TimeGenerated,
+            EventEndTime = TimeGenerated,
+            EventType = "Logon",
+            EventProduct = "Entra ID",
+            EventVendor = "Microsoft",
+            EventSchema = "Authentication",
+            EventSchemaVersion = "0.1.3",
+            EventOriginalUid = tostring(CorrelationId),
+            EventOriginalType = Category,
+            EventResultDetails = iff(ResultType == "0", "", "Other"),
+            TargetUserId = UserId,
+            TargetUserIdType = "EntraID",
+            TargetUsername = UserPrincipalName,
+            TargetUsernameType = "UPN",
+            TargetUserType = "Member",
+            TargetSessionId = tostring(CorrelationId),
+            ActorUsername = UserPrincipalName,
+            ActorUsernameType = "UPN",
+            SrcIpAddr = IPAddress,
+            SrcGeoCountry = tostring(LocationDetails.countryOrRegion),
+            SrcGeoCity = tostring(LocationDetails.city),
+            SrcDvcOs = tostring(DeviceDetail.operatingSystem),
+            SrcDvcId = tostring(DeviceDetail.deviceId),
+            SrcHostname = tostring(DeviceDetail.displayName),
+            LogonMethod = AuthenticationRequirement,
+            LogonProtocol = ClientAppUsed,
+            TargetAppName = AppDisplayName,
+            TargetAppId = AppId,
+            TargetAppType = "Cloud Service",
+            HttpUserAgent = UserAgent,
+            Dvc = "Entra ID",
+            DvcHostname = "",
+            DvcIpAddr = "",
+            EventUid = _ItemId
+        | extend
+            User = TargetUsername, LogonTarget = TargetAppName, Application = TargetAppName,
+            Dst = TargetAppName, Src = SrcIpAddr, IpAddr = SrcIpAddr
+        | project TimeGenerated, EventCount, EventStartTime, EventEndTime, EventType,
+                  EventResult, EventResultDetails, EventProduct, EventVendor, EventSchema,
+                  EventSchemaVersion, EventOriginalUid, EventOriginalType, EventUid,
+                  TargetUserId, TargetUserIdType, TargetUsername, TargetUsernameType,
+                  TargetUserType, TargetSessionId, TargetAppName, TargetAppId, TargetAppType,
+                  ActorUsername, ActorUsernameType,
+                  SrcIpAddr, SrcGeoCountry, SrcGeoCity, SrcDvcOs, SrcDvcId, SrcHostname,
+                  LogonMethod, LogonProtocol, HttpUserAgent, Dvc, DvcHostname, DvcIpAddr,
+                  User, LogonTarget, Application, Dst, Src, IpAddr, _ItemId
+    };
+    parser()
+}
+
+.create-or-alter function with (FolderName="ASIM/Authentication", DocString="ASIM Authentication parser for Windows Security 4624/4625")
+vimAuthenticationSecurityEvent(starttime:datetime=datetime(null), endtime:datetime=datetime(null), targetusername_has:string="*", eventresult:string="*")
+{
+    let parser = (){
+        SecurityEvent
+        | where EventID in (4624, 4625)
+        | where (isnull(starttime) or TimeGenerated >= starttime)
+            and (isnull(endtime) or TimeGenerated <= endtime)
+        | where (targetusername_has == "*" or TargetUserName has targetusername_has)
+        | extend EventResult = iff(EventID == 4624, "Success", "Failure")
+        | where (eventresult == "*" or EventResult == eventresult)
+        | extend
+            EventCount = int(1),
+            EventStartTime = TimeGenerated,
+            EventEndTime = TimeGenerated,
+            EventType = "Logon",
+            EventProduct = "Security Events",
+            EventVendor = "Microsoft",
+            EventSchema = "Authentication",
+            EventSchemaVersion = "0.1.3",
+            EventOriginalUid = tostring(EventID),
+            EventOriginalType = tostring(EventID),
+            EventResultDetails = case(
+                SubStatus == "0xc000006a", "Incorrect password",
+                SubStatus == "0xc0000064", "No such user",
+                SubStatus == "0xc0000234", "User locked",
+                SubStatus == "0xc0000072", "User disabled",
+                EventID == 4624, "",
+                "Other"),
+            TargetUserId = TargetUserSid,
+            TargetUserIdType = "SID",
+            TargetUsername = iff(isempty(TargetDomainName), TargetUserName,
+                                 strcat(TargetDomainName, "\\", TargetUserName)),
+            TargetUsernameType = "Windows",
+            TargetUserType = "Local",
+            TargetSessionId = TargetLogonId,
+            ActorUsername = SubjectUserName,
+            ActorUsernameType = "Windows",
+            SrcIpAddr = IpAddress,
+            SrcHostname = WorkstationName,
+            SrcGeoCountry = "",
+            SrcGeoCity = "",
+            SrcDvcOs = "",
+            SrcDvcId = "",
+            LogonMethod = AuthenticationPackageName,
+            LogonProtocol = LogonTypeName,
+            TargetAppName = "",
+            TargetAppId = "",
+            TargetAppType = "Resource",
+            HttpUserAgent = "",
+            Dvc = Computer,
+            DvcHostname = Computer,
+            DvcIpAddr = "",
+            EventUid = _ItemId
+        | extend
+            User = TargetUsername, LogonTarget = DvcHostname, Application = "",
+            Dst = DvcHostname, Src = SrcIpAddr, IpAddr = SrcIpAddr
+        | project TimeGenerated, EventCount, EventStartTime, EventEndTime, EventType,
+                  EventResult, EventResultDetails, EventProduct, EventVendor, EventSchema,
+                  EventSchemaVersion, EventOriginalUid, EventOriginalType, EventUid,
+                  TargetUserId, TargetUserIdType, TargetUsername, TargetUsernameType,
+                  TargetUserType, TargetSessionId, TargetAppName, TargetAppId, TargetAppType,
+                  ActorUsername, ActorUsernameType,
+                  SrcIpAddr, SrcGeoCountry, SrcGeoCity, SrcDvcOs, SrcDvcId, SrcHostname,
+                  LogonMethod, LogonProtocol, HttpUserAgent, Dvc, DvcHostname, DvcIpAddr,
+                  User, LogonTarget, Application, Dst, Src, IpAddr, _ItemId
+    };
+    parser()
+}
+
+.create-or-alter function with (FolderName="ASIM/Authentication", DocString="ASIM Authentication parser for Defender DeviceLogonEvents")
+vimAuthenticationDeviceLogonEvents(starttime:datetime=datetime(null), endtime:datetime=datetime(null), targetusername_has:string="*", eventresult:string="*")
+{
+    let parser = (){
+        DeviceLogonEvents
+        | where (isnull(starttime) or TimeGenerated >= starttime)
+            and (isnull(endtime) or TimeGenerated <= endtime)
+        | where (targetusername_has == "*" or AccountName has targetusername_has)
+        | extend EventResult = iff(ActionType == "LogonSuccess", "Success", "Failure")
+        | where (eventresult == "*" or EventResult == eventresult)
+        | extend
+            EventCount = int(1),
+            EventStartTime = TimeGenerated,
+            EventEndTime = TimeGenerated,
+            EventType = "Logon",
+            EventProduct = "M365 Defender for Endpoint",
+            EventVendor = "Microsoft",
+            EventSchema = "Authentication",
+            EventSchemaVersion = "0.1.3",
+            EventOriginalUid = ReportId,
+            EventOriginalType = ActionType,
+            EventResultDetails = FailureReason,
+            TargetUserId = AccountObjectId,
+            TargetUserIdType = "EntraID",
+            TargetUsername = iff(isempty(AccountDomain), AccountName,
+                                 strcat(AccountDomain, "\\", AccountName)),
+            TargetUsernameType = "Windows",
+            TargetUserType = iff(IsLocalAdmin, "Admin", "Regular"),
+            TargetSessionId = LogonId,
+            ActorUsername = InitiatingProcessAccountName,
+            ActorUsernameType = "Windows",
+            SrcIpAddr = RemoteIP,
+            SrcHostname = RemoteDeviceName,
+            SrcGeoCountry = "", SrcGeoCity = "", SrcDvcOs = "", SrcDvcId = "",
+            LogonMethod = Protocol,
+            LogonProtocol = LogonType,
+            TargetAppName = "", TargetAppId = "", TargetAppType = "Resource",
+            HttpUserAgent = "",
+            Dvc = DeviceName,
+            DvcHostname = DeviceName,
+            DvcIpAddr = "",
+            EventUid = _ItemId
+        | extend
+            User = TargetUsername, LogonTarget = DvcHostname, Application = "",
+            Dst = DvcHostname, Src = SrcIpAddr, IpAddr = SrcIpAddr
+        | project TimeGenerated, EventCount, EventStartTime, EventEndTime, EventType,
+                  EventResult, EventResultDetails, EventProduct, EventVendor, EventSchema,
+                  EventSchemaVersion, EventOriginalUid, EventOriginalType, EventUid,
+                  TargetUserId, TargetUserIdType, TargetUsername, TargetUsernameType,
+                  TargetUserType, TargetSessionId, TargetAppName, TargetAppId, TargetAppType,
+                  ActorUsername, ActorUsernameType,
+                  SrcIpAddr, SrcGeoCountry, SrcGeoCity, SrcDvcOs, SrcDvcId, SrcHostname,
+                  LogonMethod, LogonProtocol, HttpUserAgent, Dvc, DvcHostname, DvcIpAddr,
+                  User, LogonTarget, Application, Dst, Src, IpAddr, _ItemId
+    };
+    parser()
+}
+
+.create-or-alter function with (FolderName="ASIM/Authentication", DocString="ASIM unifying Authentication parser")
+_Im_Authentication(starttime:datetime=datetime(null), endtime:datetime=datetime(null), targetusername_has:string="*", eventresult:string="*")
+{
+    union isfuzzy=true
+        vimAuthenticationSigninLogs(starttime, endtime, targetusername_has, eventresult),
+        vimAuthenticationAADNonInteractive(starttime, endtime, targetusername_has, eventresult),
+        vimAuthenticationSecurityEvent(starttime, endtime, targetusername_has, eventresult),
+        vimAuthenticationDeviceLogonEvents(starttime, endtime, targetusername_has, eventresult)
+}

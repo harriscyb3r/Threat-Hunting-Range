@@ -1,0 +1,16 @@
+# Kusto Threat Hunting Range — backend
+# Python 3.11+ required (3.13 verified)
+
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
+
+# Kusto transport.
+#
+# The emulator speaks plain HTTP JSON on /v1/rest/{query,mgmt} with no auth, so
+# azure-kusto-data (which drags in MSAL, azure-identity and a token cache we
+# have nothing to authenticate against) buys nothing here. httpx gives async
+# ingest batching and connection reuse in ~200 lines of client code.
+httpx==0.28.1

@@ -1,0 +1,194 @@
+// ASIM ProcessEvent parsers.
+//
+// The pairing that makes this worth having: the *same* execution appears in
+// DeviceProcessEvents and in SecurityEvent 4688, with different column names
+// and different completeness. `_Im_ProcessCreate` gives one view over both — and
+// shows immediately where 4688 has no command line because auditing was never
+// configured, which is the most common blind spot in a real environment.
+//
+// DEVIATION FROM SENTINEL ASIM: the `disabled:bool=false` parameter is omitted.
+// `disabled` is a reserved word in this engine's function-parameter grammar —
+// `disabled:bool=false` is rejected with SYN0002 while `isdisabled:bool=false`
+// and `p:bool=false` are both accepted, so it is the identifier, not the type.
+// In Sentinel that parameter exists so a tenant can switch a source parser off
+// centrally via the ASimDisabledParsers watchlist; it has no meaning in a local
+// range. Every other parameter and field matches upstream, so queries written
+// here still port unchanged.
+
+.create-or-alter function with (FolderName="ASIM/ProcessEvent", DocString="ASIM ProcessCreate parser for Defender DeviceProcessEvents")
+vimProcessCreateMicrosoft365D(starttime:datetime=datetime(null), endtime:datetime=datetime(null), commandline_has_any:dynamic=dynamic([]), targetprocess_has_any:dynamic=dynamic([]), actingprocess_has_any:dynamic=dynamic([]), targetusername_has:string="*", hostname_has_any:dynamic=dynamic([]))
+{
+    let parser = (){
+        DeviceProcessEvents
+        | where ActionType == "ProcessCreated"
+        | where (isnull(starttime) or TimeGenerated >= starttime)
+            and (isnull(endtime) or TimeGenerated <= endtime)
+        | where (array_length(commandline_has_any) == 0
+                 or ProcessCommandLine has_any (commandline_has_any))
+        | where (array_length(targetprocess_has_any) == 0
+                 or FileName has_any (targetprocess_has_any))
+        | where (array_length(actingprocess_has_any) == 0
+                 or InitiatingProcessFileName has_any (actingprocess_has_any))
+        | where (array_length(hostname_has_any) == 0 or DeviceName has_any (hostname_has_any))
+        | where (targetusername_has == "*" or AccountName has targetusername_has)
+        | extend
+            EventCount = int(1),
+            EventStartTime = TimeGenerated,
+            EventEndTime = TimeGenerated,
+            EventType = "ProcessCreated",
+            EventResult = "Success",
+            EventProduct = "M365 Defender for Endpoint",
+            EventVendor = "Microsoft",
+            EventSchema = "ProcessEvent",
+            EventSchemaVersion = "0.1.4",
+            EventOriginalUid = ReportId,
+            EventOriginalType = ActionType,
+            EventUid = _ItemId,
+            DvcId = DeviceId,
+            DvcHostname = DeviceName,
+            DvcIdType = "MDEid",
+            DvcOs = "Windows",
+            TargetProcessName = FolderPath,
+            TargetProcessFilename = FileName,
+            TargetProcessCommandLine = ProcessCommandLine,
+            TargetProcessId = tostring(ProcessId),
+            TargetProcessSHA1 = SHA1,
+            TargetProcessSHA256 = SHA256,
+            TargetProcessMD5 = MD5,
+            TargetProcessCreationTime = ProcessCreationTime,
+            TargetProcessIntegrityLevel = ProcessIntegrityLevel,
+            TargetProcessTokenElevation = ProcessTokenElevation,
+            TargetProcessCompany = ProcessVersionInfoCompanyName,
+            TargetProcessFileSize = FileSize,
+            TargetUsername = iff(isempty(AccountDomain), AccountName,
+                                 strcat(AccountDomain, "\\", AccountName)),
+            TargetUsernameType = "Windows",
+            TargetUserId = AccountSid,
+            TargetUserIdType = "SID",
+            TargetUserSessionId = LogonId,
+            ActingProcessName = InitiatingProcessFolderPath,
+            ActingProcessFilename = InitiatingProcessFileName,
+            ActingProcessCommandLine = InitiatingProcessCommandLine,
+            ActingProcessId = tostring(InitiatingProcessId),
+            ActingProcessSHA256 = InitiatingProcessSHA256,
+            ActorUsername = iff(isempty(InitiatingProcessAccountDomain),
+                                InitiatingProcessAccountName,
+                                strcat(InitiatingProcessAccountDomain, "\\",
+                                       InitiatingProcessAccountName)),
+            ActorUsernameType = "Windows",
+            ActorUserId = InitiatingProcessAccountSid,
+            ParentProcessName = InitiatingProcessParentFileName,
+            ParentProcessId = tostring(InitiatingProcessParentId)
+        | extend
+            Process = TargetProcessName, User = TargetUsername,
+            CommandLine = TargetProcessCommandLine, Dvc = DvcHostname,
+            Hash = TargetProcessSHA256
+        | project TimeGenerated, EventCount, EventStartTime, EventEndTime, EventType,
+                  EventResult, EventProduct, EventVendor, EventSchema, EventSchemaVersion,
+                  EventOriginalUid, EventOriginalType, EventUid,
+                  DvcId, DvcHostname, DvcIdType, DvcOs, Dvc,
+                  TargetProcessName, TargetProcessFilename, TargetProcessCommandLine,
+                  TargetProcessId, TargetProcessSHA1, TargetProcessSHA256, TargetProcessMD5,
+                  TargetProcessCreationTime, TargetProcessIntegrityLevel,
+                  TargetProcessTokenElevation, TargetProcessCompany, TargetProcessFileSize,
+                  TargetUsername, TargetUsernameType, TargetUserId, TargetUserIdType,
+                  TargetUserSessionId,
+                  ActingProcessName, ActingProcessFilename, ActingProcessCommandLine,
+                  ActingProcessId, ActingProcessSHA256,
+                  ActorUsername, ActorUsernameType, ActorUserId,
+                  ParentProcessName, ParentProcessId,
+                  Process, User, CommandLine, Hash, _ItemId
+    };
+    parser()
+}
+
+.create-or-alter function with (FolderName="ASIM/ProcessEvent", DocString="ASIM ProcessCreate parser for Windows Security 4688")
+vimProcessCreateMicrosoftSecurityEvents(starttime:datetime=datetime(null), endtime:datetime=datetime(null), commandline_has_any:dynamic=dynamic([]), targetprocess_has_any:dynamic=dynamic([]), actingprocess_has_any:dynamic=dynamic([]), targetusername_has:string="*", hostname_has_any:dynamic=dynamic([]))
+{
+    let parser = (){
+        SecurityEvent
+        | where EventID == 4688
+        | where (isnull(starttime) or TimeGenerated >= starttime)
+            and (isnull(endtime) or TimeGenerated <= endtime)
+        | where (array_length(commandline_has_any) == 0
+                 or CommandLine has_any (commandline_has_any))
+        | where (array_length(targetprocess_has_any) == 0
+                 or NewProcessName has_any (targetprocess_has_any))
+        | where (array_length(actingprocess_has_any) == 0
+                 or ParentProcessName has_any (actingprocess_has_any))
+        | where (array_length(hostname_has_any) == 0 or Computer has_any (hostname_has_any))
+        | where (targetusername_has == "*" or SubjectUserName has targetusername_has)
+        | extend
+            EventCount = int(1),
+            EventStartTime = TimeGenerated,
+            EventEndTime = TimeGenerated,
+            EventType = "ProcessCreated",
+            EventResult = "Success",
+            EventProduct = "Security Events",
+            EventVendor = "Microsoft",
+            EventSchema = "ProcessEvent",
+            EventSchemaVersion = "0.1.4",
+            EventOriginalUid = tostring(EventID),
+            EventOriginalType = tostring(EventID),
+            EventUid = _ItemId,
+            DvcId = "",
+            DvcHostname = Computer,
+            DvcIdType = "",
+            DvcOs = "Windows",
+            TargetProcessName = NewProcessName,
+            TargetProcessFilename = tostring(split(NewProcessName, "\\")[-1]),
+            TargetProcessCommandLine = CommandLine,
+            TargetProcessId = NewProcessId,
+            TargetProcessSHA1 = "", TargetProcessSHA256 = "", TargetProcessMD5 = "",
+            TargetProcessCreationTime = TimeGenerated,
+            TargetProcessIntegrityLevel = MandatoryLabel,
+            TargetProcessTokenElevation = TokenElevationType,
+            TargetProcessCompany = "",
+            TargetProcessFileSize = long(null),
+            TargetUsername = iff(isempty(SubjectDomainName), SubjectUserName,
+                                 strcat(SubjectDomainName, "\\", SubjectUserName)),
+            TargetUsernameType = "Windows",
+            TargetUserId = SubjectUserSid,
+            TargetUserIdType = "SID",
+            TargetUserSessionId = SubjectLogonId,
+            ActingProcessName = ParentProcessName,
+            ActingProcessFilename = tostring(split(ParentProcessName, "\\")[-1]),
+            ActingProcessCommandLine = "",
+            ActingProcessId = ProcessId,
+            ActingProcessSHA256 = "",
+            ActorUsername = iff(isempty(SubjectDomainName), SubjectUserName,
+                                strcat(SubjectDomainName, "\\", SubjectUserName)),
+            ActorUsernameType = "Windows",
+            ActorUserId = SubjectUserSid,
+            ParentProcessName = ParentProcessName,
+            ParentProcessId = ProcessId
+        | extend
+            Process = TargetProcessName, User = TargetUsername,
+            CommandLine = TargetProcessCommandLine, Dvc = DvcHostname,
+            Hash = TargetProcessSHA256
+        | project TimeGenerated, EventCount, EventStartTime, EventEndTime, EventType,
+                  EventResult, EventProduct, EventVendor, EventSchema, EventSchemaVersion,
+                  EventOriginalUid, EventOriginalType, EventUid,
+                  DvcId, DvcHostname, DvcIdType, DvcOs, Dvc,
+                  TargetProcessName, TargetProcessFilename, TargetProcessCommandLine,
+                  TargetProcessId, TargetProcessSHA1, TargetProcessSHA256, TargetProcessMD5,
+                  TargetProcessCreationTime, TargetProcessIntegrityLevel,
+                  TargetProcessTokenElevation, TargetProcessCompany, TargetProcessFileSize,
+                  TargetUsername, TargetUsernameType, TargetUserId, TargetUserIdType,
+                  TargetUserSessionId,
+                  ActingProcessName, ActingProcessFilename, ActingProcessCommandLine,
+                  ActingProcessId, ActingProcessSHA256,
+                  ActorUsername, ActorUsernameType, ActorUserId,
+                  ParentProcessName, ParentProcessId,
+                  Process, User, CommandLine, Hash, _ItemId
+    };
+    parser()
+}
+
+.create-or-alter function with (FolderName="ASIM/ProcessEvent", DocString="ASIM unifying ProcessCreate parser")
+_Im_ProcessCreate(starttime:datetime=datetime(null), endtime:datetime=datetime(null), commandline_has_any:dynamic=dynamic([]), targetprocess_has_any:dynamic=dynamic([]), actingprocess_has_any:dynamic=dynamic([]), targetusername_has:string="*", hostname_has_any:dynamic=dynamic([]))
+{
+    union isfuzzy=true
+        vimProcessCreateMicrosoft365D(starttime, endtime, commandline_has_any, targetprocess_has_any, actingprocess_has_any, targetusername_has, hostname_has_any),
+        vimProcessCreateMicrosoftSecurityEvents(starttime, endtime, commandline_has_any, targetprocess_has_any, actingprocess_has_any, targetusername_has, hostname_has_any)
+}

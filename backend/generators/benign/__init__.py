@@ -1,0 +1,1 @@
+"""Benign telemetry generators."""

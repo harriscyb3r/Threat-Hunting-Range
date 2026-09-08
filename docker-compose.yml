@@ -1,0 +1,42 @@
+# Kusto Threat Hunting Range — local stack.
+#
+#   docker compose up -d                 # Kusto only (run the backend on the host)
+#   docker compose --profile app up -d   # Kusto + backend in containers
+#
+# The volume MUST be a named volume, not a bind mount. On Windows, Git Bash
+# rewrites `-v /c/path:/kustodata` into a mount at `\Program Files\Git\kustodata`
+# — the engine then writes happily to the wrong place and every campaign is lost
+# on the next `docker compose down`. A named volume has no host path to mangle.
+services:
+  kusto:
+    image: mcr.microsoft.com/azuredataexplorer/kustainer-linux:latest
+    container_name: hr-kusto
+    environment:
+      ACCEPT_EULA: "Y"
+    ports:
+      - "8080:8080"
+    volumes:
+      - hr_kusto:/kustodata
+    restart: unless-stopped
+    # No healthcheck: the image ships no curl/wget, so every shell-based probe
+    # reports unhealthy forever. The backend polls the query endpoint itself
+    # (KustoClient.wait_ready), which is a truer readiness signal anyway.
+
+  backend:
+    profiles: ["app"]
+    build: ./backend
+    container_name: hr-backend
+    depends_on:
+      - kusto
+    environment:
+      # Inside the compose network the engine is reachable by service name.
+      RANGE_KUSTO_URL: "http://kusto:8080"
+      RANGE_HOST: "0.0.0.0"
+    ports:
+      - "8780:8780"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+volumes:
+  hr_kusto:

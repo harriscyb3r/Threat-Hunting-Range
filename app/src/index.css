@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+
+html, body, #root { height: 100%; margin: 0; }
+body {
+  color: #e5edf2;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* A barely-there radial lift so large dark areas don't read as a flat void. */
+  background:
+    radial-gradient(1200px 600px at 20% -10%, rgba(16,185,129,0.04), transparent 60%),
+    radial-gradient(1000px 700px at 100% 0%, rgba(52,211,153,0.025), transparent 55%),
+    #080a0c;
+  background-attachment: fixed;
+}
+
+/* A ~2% film-grain overlay on top of the flat base so vast dark panels have
+   texture instead of reading as a dead void. Fixed, non-interactive, and behind
+   all content — an inline feTurbulence SVG so it costs no network request. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.022;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+/* Keep app chrome above the grain. */
+#root { position: relative; z-index: 1; }
+
+/* Interactive elements get a short eased colour transition by default, so
+   nothing changes state by teleporting. Opt out with `transition-none`. */
+@layer base {
+  button, a, input, select, textarea, [role='button'] {
+    transition: color 150ms ease, background-color 150ms ease,
+                border-color 150ms ease, box-shadow 150ms ease, transform 120ms ease;
+  }
+  /* A branded focus ring, replacing the browser default outline. */
+  :focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(16,185,129,0.5), 0 0 0 4px #080a0c;
+    border-radius: 6px;
+  }
+}
+
+/* Thin dark scrollbars, matching the surface. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2b3540; border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: #3a4652; }
+
+kbd { font-size: 0.7rem; }
+
+/* Skeleton shimmer — a light sweep across a placeholder block. */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #13171b;
+}
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.045), transparent);
+  animation: shimmer 1.6s infinite;
+}
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+
+/* The grade ring draws its arc on reveal — a small screenshot-worthy moment in
+   the debrief. The dashoffset is set inline per score; this just eases it from
+   "empty" to that value on mount. */
+@keyframes ringDraw { from { stroke-dashoffset: var(--ring-circ); } }
+.ring-arc { animation: ringDraw 900ms cubic-bezier(0.22, 1, 0.36, 1); }

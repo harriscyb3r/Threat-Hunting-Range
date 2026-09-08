@@ -1,0 +1,226 @@
+// ASIM Dns and NetworkSession parsers.
+//
+// DEVIATION FROM SENTINEL ASIM: the `disabled:bool=false` parameter is omitted.
+// `disabled` is a reserved word in this engine's function-parameter grammar —
+// `disabled:bool=false` is rejected with SYN0002 while `isdisabled:bool=false`
+// and `p:bool=false` are both accepted, so it is the identifier, not the type.
+// In Sentinel that parameter exists so a tenant can switch a source parser off
+// centrally via the ASimDisabledParsers watchlist; it has no meaning in a local
+// range. Every other parameter and field matches upstream, so queries written
+// here still port unchanged.
+//
+// SECOND DEVIATION, NetworkSession only: `srcipaddr_has_any_prefix` and
+// `dstipaddr_has_any_prefix` are implemented with `has_any` rather than
+// `has_any_ipv4_prefix`. This engine requires a *constant* dynamic array for
+// has_any_ipv4_prefix (SEM0031), so a function parameter cannot feed it, and
+// `ipv4_is_in_any_range` rejects a parameter for the same reason. The parameter
+// names are kept identical to upstream so hunts stay portable, and for dotted
+// prefixes like "10.20." the behaviour matches. It differs for CIDR notation:
+// pass "10.20." here, not "10.20.0.0/16".
+
+.create-or-alter function with (FolderName="ASIM/Dns", DocString="ASIM DNS parser for Microsoft DNS server logs")
+vimDnsMicrosoftOMS(starttime:datetime=datetime(null), endtime:datetime=datetime(null), srcipaddr:string="*", domain_has_any:dynamic=dynamic([]), responsecodename:string="*", eventtype:string="lookup")
+{
+    let parser = (){
+        DnsEvents
+        | where SubType == "LookupQuery"
+        | where (isnull(starttime) or TimeGenerated >= starttime)
+            and (isnull(endtime) or TimeGenerated <= endtime)
+        | where (srcipaddr == "*" or ClientIP == srcipaddr)
+        | where (array_length(domain_has_any) == 0 or Name has_any (domain_has_any))
+        | extend DnsResponseCodeName = case(
+              ResultCode == 0, "NOERROR",
+              ResultCode == 1, "FORMERR",
+              ResultCode == 2, "SERVFAIL",
+              ResultCode == 3, "NXDOMAIN",
+              ResultCode == 5, "REFUSED",
+              "OTHER")
+        | where (responsecodename == "*" or DnsResponseCodeName =~ responsecodename)
+        | extend
+            EventCount = int(1),
+            EventStartTime = TimeGenerated,
+            EventEndTime = TimeGenerated,
+            EventType = "lookup",
+            EventSubType = "response",
+            EventResult = iff(ResultCode == 0, "Success", "Failure"),
+            EventResultDetails = DnsResponseCodeName,
+            EventProduct = "DNS Server",
+            EventVendor = "Microsoft",
+            EventSchema = "Dns",
+            EventSchemaVersion = "0.1.7",
+            EventOriginalType = EventOriginalType,
+            EventUid = _ItemId,
+            SrcIpAddr = ClientIP,
+            SrcPortNumber = Port,
+            DnsQuery = trim_end(@".", Name),
+            DnsQueryTypeName = QueryType,
+            DnsResponseCode = ResultCode,
+            DnsResponseName = IPAddresses,
+            DnsNetworkDuration = int(null),
+            NetworkProtocol = Protocol,
+            TransactionIdHex = tostring(TransactionID),
+            DvcHostname = Computer,
+            DvcIpAddr = "",
+            Dvc = Computer
+        | extend
+            Domain = DnsQuery,
+            Src = SrcIpAddr,
+            IpAddr = SrcIpAddr,
+            DnsQueryTypeNameNormalized = DnsQueryTypeName
+        | project TimeGenerated, EventCount, EventStartTime, EventEndTime, EventType,
+                  EventSubType, EventResult, EventResultDetails, EventProduct, EventVendor,
+                  EventSchema, EventSchemaVersion, EventOriginalType, EventUid,
+                  SrcIpAddr, SrcPortNumber, DnsQuery, DnsQueryTypeName, DnsResponseCode,
+                  DnsResponseCodeName, DnsResponseName, DnsNetworkDuration, NetworkProtocol,
+                  TransactionIdHex, DvcHostname, DvcIpAddr, Dvc,
+                  Domain, Src, IpAddr, DnsQueryTypeNameNormalized, _ItemId
+    };
+    parser()
+}
+
+.create-or-alter function with (FolderName="ASIM/Dns", DocString="ASIM unifying DNS parser")
+_Im_Dns(starttime:datetime=datetime(null), endtime:datetime=datetime(null), srcipaddr:string="*", domain_has_any:dynamic=dynamic([]), responsecodename:string="*", eventtype:string="lookup")
+{
+    union isfuzzy=true
+        vimDnsMicrosoftOMS(starttime, endtime, srcipaddr, domain_has_any, responsecodename, eventtype)
+}
+
+.create-or-alter function with (FolderName="ASIM/NetworkSession", DocString="ASIM NetworkSession parser for Defender DeviceNetworkEvents")
+vimNetworkSessionMicrosoft365D(starttime:datetime=datetime(null), endtime:datetime=datetime(null), srcipaddr_has_any_prefix:dynamic=dynamic([]), dstipaddr_has_any_prefix:dynamic=dynamic([]), dstportnumber:int=int(null), hostname_has_any:dynamic=dynamic([]), dvcaction:string="*")
+{
+    let parser = (){
+        DeviceNetworkEvents
+        | where (isnull(starttime) or TimeGenerated >= starttime)
+            and (isnull(endtime) or TimeGenerated <= endtime)
+        | where (isnull(dstportnumber) or RemotePort == dstportnumber)
+        | where (array_length(hostname_has_any) == 0 or DeviceName has_any (hostname_has_any))
+        | where (array_length(srcipaddr_has_any_prefix) == 0
+                 or LocalIP has_any (srcipaddr_has_any_prefix))
+        | where (array_length(dstipaddr_has_any_prefix) == 0
+                 or RemoteIP has_any (dstipaddr_has_any_prefix))
+        | extend DvcAction = iff(ActionType startswith "ConnectionSuccess", "Allow", "Deny")
+        | where (dvcaction == "*" or DvcAction =~ dvcaction)
+        | extend
+            EventCount = int(1),
+            EventStartTime = TimeGenerated,
+            EventEndTime = TimeGenerated,
+            EventType = "NetworkSession",
+            EventSubType = "",
+            EventResult = iff(DvcAction == "Allow", "Success", "Failure"),
+            EventProduct = "M365 Defender for Endpoint",
+            EventVendor = "Microsoft",
+            EventSchema = "NetworkSession",
+            EventSchemaVersion = "0.2.6",
+            EventOriginalUid = ReportId,
+            EventOriginalType = ActionType,
+            EventUid = _ItemId,
+            SrcIpAddr = LocalIP,
+            SrcPortNumber = LocalPort,
+            SrcHostname = DeviceName,
+            SrcDvcId = DeviceId,
+            SrcUsername = iff(isempty(InitiatingProcessAccountDomain),
+                              InitiatingProcessAccountName,
+                              strcat(InitiatingProcessAccountDomain, "\\",
+                                     InitiatingProcessAccountName)),
+            SrcUsernameType = "Windows",
+            SrcProcessName = InitiatingProcessFolderPath,
+            SrcProcessId = tostring(InitiatingProcessId),
+            DstIpAddr = RemoteIP,
+            DstPortNumber = RemotePort,
+            DstHostname = RemoteUrl,
+            Url = RemoteUrl,
+            NetworkProtocol = toupper(Protocol),
+            NetworkDirection = "Outbound",
+            SrcBytes = long(null),
+            DstBytes = long(null),
+            DvcHostname = DeviceName,
+            DvcId = DeviceId,
+            Dvc = DeviceName
+        | extend
+            Src = SrcIpAddr, Dst = DstIpAddr, IpAddr = SrcIpAddr,
+            User = SrcUsername, Process = SrcProcessName
+        | project TimeGenerated, EventCount, EventStartTime, EventEndTime, EventType,
+                  EventSubType, EventResult, EventProduct, EventVendor, EventSchema,
+                  EventSchemaVersion, EventOriginalUid, EventOriginalType, EventUid,
+                  SrcIpAddr, SrcPortNumber, SrcHostname, SrcDvcId, SrcUsername,
+                  SrcUsernameType, SrcProcessName, SrcProcessId,
+                  DstIpAddr, DstPortNumber, DstHostname, Url,
+                  NetworkProtocol, NetworkDirection, DvcAction, SrcBytes, DstBytes,
+                  DvcHostname, DvcId, Dvc, Src, Dst, IpAddr, User, Process, _ItemId
+    };
+    parser()
+}
+
+.create-or-alter function with (FolderName="ASIM/NetworkSession", DocString="ASIM NetworkSession parser for Palo Alto CEF")
+vimNetworkSessionPaloAltoCEF(starttime:datetime=datetime(null), endtime:datetime=datetime(null), srcipaddr_has_any_prefix:dynamic=dynamic([]), dstipaddr_has_any_prefix:dynamic=dynamic([]), dstportnumber:int=int(null), hostname_has_any:dynamic=dynamic([]), dvcaction:string="*")
+{
+    let parser = (){
+        CommonSecurityLog
+        | where DeviceVendor == "Palo Alto Networks"
+        | where (isnull(starttime) or TimeGenerated >= starttime)
+            and (isnull(endtime) or TimeGenerated <= endtime)
+        | where (isnull(dstportnumber) or DestinationPort == dstportnumber)
+        | where (array_length(hostname_has_any) == 0 or SourceHostName has_any (hostname_has_any))
+        | where (array_length(srcipaddr_has_any_prefix) == 0
+                 or SourceIP has_any (srcipaddr_has_any_prefix))
+        | where (array_length(dstipaddr_has_any_prefix) == 0
+                 or DestinationIP has_any (dstipaddr_has_any_prefix))
+        | extend DvcAction = case(DeviceAction =~ "allow", "Allow",
+                                  DeviceAction =~ "deny", "Deny",
+                                  DeviceAction =~ "drop", "Drop", DeviceAction)
+        | where (dvcaction == "*" or DvcAction =~ dvcaction)
+        | extend
+            EventCount = int(1),
+            EventStartTime = TimeGenerated,
+            EventEndTime = TimeGenerated,
+            EventType = "NetworkSession",
+            EventSubType = "",
+            EventResult = iff(DvcAction == "Allow", "Success", "Failure"),
+            EventProduct = DeviceProduct,
+            EventVendor = "Palo Alto",
+            EventSchema = "NetworkSession",
+            EventSchemaVersion = "0.2.6",
+            EventOriginalUid = ExternalID,
+            EventOriginalType = DeviceEventClassID,
+            EventUid = _ItemId,
+            SrcIpAddr = SourceIP,
+            SrcPortNumber = SourcePort,
+            SrcHostname = SourceHostName,
+            SrcDvcId = "",
+            SrcUsername = SourceUserName,
+            SrcUsernameType = "Windows",
+            SrcProcessName = "", SrcProcessId = "",
+            DstIpAddr = DestinationIP,
+            DstPortNumber = DestinationPort,
+            DstHostname = DestinationHostName,
+            Url = RequestURL,
+            NetworkProtocol = Protocol,
+            NetworkDirection = CommunicationDirection,
+            SrcBytes = SentBytes,
+            DstBytes = ReceivedBytes,
+            NetworkApplicationProtocol = ApplicationProtocol,
+            DvcHostname = DeviceName,
+            DvcId = "",
+            Dvc = DeviceName
+        | extend
+            Src = SrcIpAddr, Dst = DstIpAddr, IpAddr = SrcIpAddr,
+            User = SrcUsername, Process = SrcProcessName
+        | project TimeGenerated, EventCount, EventStartTime, EventEndTime, EventType,
+                  EventSubType, EventResult, EventProduct, EventVendor, EventSchema,
+                  EventSchemaVersion, EventOriginalUid, EventOriginalType, EventUid,
+                  SrcIpAddr, SrcPortNumber, SrcHostname, SrcDvcId, SrcUsername,
+                  SrcUsernameType, SrcProcessName, SrcProcessId,
+                  DstIpAddr, DstPortNumber, DstHostname, Url,
+                  NetworkProtocol, NetworkDirection, DvcAction, SrcBytes, DstBytes,
+                  DvcHostname, DvcId, Dvc, Src, Dst, IpAddr, User, Process, _ItemId
+    };
+    parser()
+}
+
+.create-or-alter function with (FolderName="ASIM/NetworkSession", DocString="ASIM unifying NetworkSession parser")
+_Im_NetworkSession(starttime:datetime=datetime(null), endtime:datetime=datetime(null), srcipaddr_has_any_prefix:dynamic=dynamic([]), dstipaddr_has_any_prefix:dynamic=dynamic([]), dstportnumber:int=int(null), hostname_has_any:dynamic=dynamic([]), dvcaction:string="*")
+{
+    union isfuzzy=true
+        vimNetworkSessionMicrosoft365D(starttime, endtime, srcipaddr_has_any_prefix, dstipaddr_has_any_prefix, dstportnumber, hostname_has_any, dvcaction),
+        vimNetworkSessionPaloAltoCEF(starttime, endtime, srcipaddr_has_any_prefix, dstipaddr_has_any_prefix, dstportnumber, hostname_has_any, dvcaction)
+}
