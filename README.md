@@ -59,7 +59,7 @@ A few things worth knowing before the first run:
 ## Quick start
 
 ```bash
-git clone https://github.com/<your-username>/hunting-range.git
+git clone https://github.com/harriscyb3r/hunting-range.git
 cd hunting-range
 
 docker compose up -d                      # 1. start the Kusto engine
@@ -107,21 +107,6 @@ attack emitters, the PEAK workspace, scoring, and emitter coverage respectively.
 Run `probe.py` after any `docker pull` of the engine image. It is pinned to `:latest`, and the
 curriculum depends on features — `autocluster`, `basket`, `diffpatterns` — that PEAK Baseline and
 Model-Assisted hunts cannot work without.
-
----
-
-## Status — all 7 phases complete
-
-| | |
-|---|---|
-| ✅ **0** | Scaffold, compose, Kusto client, campaign registry, **startup reconciler** |
-| ✅ **1** | 20 table schemas, 13 ASIM parsers, org model, benign generators + noise, batched ingest |
-| ✅ **2** | 44 attack emitters (131 variants), decoys, resolver, campaign build/reset, clean twin |
-| ✅ **3** | Query Lab, behaviour-first Scenarios, technique catalogue, campaigns + Study mode |
-| ✅ **4** | PEAK workspace, evidence & findings, detections, Sigma export, twin validation |
-| ✅ **5** | Actor-first CTI paste → local drafter (actor + kill chain + IOCs) |
-| ✅ **6** | Hunt scoring, answer-key debrief, scoreboard + ATT&CK coverage |
-| ✅ **7** | 8 library campaigns + 16-lesson SC-200-aligned KQL curriculum |
 
 ---
 
@@ -489,8 +474,8 @@ executed on your machine, and nothing leaves it.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). A table schema, a technique emitter (with variants that
-defeat the naive query), or an ASIM parser are the highest-value contributions.
+A table schema, a technique emitter (with variants that defeat the naive query), or an ASIM
+parser are the highest-value contributions.
 
 ## License
 
